@@ -174,9 +174,11 @@ def process_line(line: str, token: str, chat_id: str, pool_id: str) -> None:
     if kind == "TraceForgedBlock":
         slot = find_value(entry, "slot")
         block_no = find_value(entry, "blockNo")
-        # Field name varies across node versions: "blockHash" or "headerHash"
+        # Field name varies across node versions: "blockHash", "headerHash", or "block"
         # We intentionally skip the generic "hash" key — it appears in many log fields
-        block_hash = find_value(entry, "blockHash") or find_value(entry, "headerHash")
+        block_hash = (find_value(entry, "blockHash")
+                      or find_value(entry, "headerHash")
+                      or find_value(entry, "block"))
 
         log.info("Block FORGED — slot=%s blockNo=%s hash=%s", slot, block_no, block_hash)
 
@@ -201,18 +203,20 @@ def process_line(line: str, token: str, chat_id: str, pool_id: str) -> None:
         t.start()
 
 
-def tail_log(log_path: str, config: dict) -> None:
-    """Follow the node log file, reopening it automatically on rotation."""
+def tail_log(log_path: str, config: dict, from_start: bool = False) -> None:
+    """Follow the node log file, reopening it automatically on rotation.
+    from_start=True reads existing content first — useful for testing with a static file."""
     token = config["telegram_bot_token"]
     chat_id = config["telegram_chat_id"]
     pool_id = config["pool_id"]
 
-    log.info("Watching log: %s  pool: %s", log_path, pool_id)
+    log.info("Watching log: %s  pool: %s  from_start=%s", log_path, pool_id, from_start)
 
     while True:
         try:
             with open(log_path) as f:
-                f.seek(0, 2)  # jump to end — we only care about new events
+                if not from_start:
+                    f.seek(0, 2)  # jump to end — we only care about new events
                 current_inode = os.stat(log_path).st_ino
                 while True:
                     line = f.readline()
@@ -236,13 +240,19 @@ def tail_log(log_path: str, config: dict) -> None:
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Cardano block forge notifier")
+    parser.add_argument("--from-start", action="store_true",
+                        help="Read log from the beginning (for testing with a static file)")
+    args = parser.parse_args()
+
     config_path = os.environ.get("BLOCK_CHECKER_CONFIG", "config.json")
     if not Path(config_path).exists():
         log.error("Config file not found: %s", config_path)
         sys.exit(1)
 
     config = load_config(config_path)
-    tail_log(config["node_log_path"], config)
+    tail_log(config["node_log_path"], config, from_start=args.from_start)
 
 
 if __name__ == "__main__":
