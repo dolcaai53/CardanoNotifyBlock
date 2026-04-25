@@ -1,0 +1,6 @@
+{
+    "node_log_path": "/opt/cardano/cnode/logs/node.json",
+    "pool_id": "pool1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "telegram_bot_token": "1234567890:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "telegram_chat_id": "-1001234567890"
+}

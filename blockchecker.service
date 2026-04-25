@@ -1,0 +1,23 @@
+[Unit]
+Description=Cardano Block Checker — onchain block verification and Telegram notifications
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Change to the user that runs cardano-node — needs read access to the node log file
+User=cardano
+
+Environment=BLOCK_CHECKER_CONFIG=/opt/cardano/blockChecker/config.json
+ExecStart=/opt/cardano/blockChecker/venv/bin/python /opt/cardano/blockChecker/block_checker.py
+
+# Restart automatically on failure; wait 10s so we don't hammer a broken state
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
