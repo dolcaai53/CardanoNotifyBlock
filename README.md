@@ -53,9 +53,31 @@ venv/bin/pip install -r requirements.txt
 cp config.example.json config.json
 nano config.json   # fill in your values
 
-# 4. Test run (Ctrl+C to stop)
+# 4. Test run against the live log (Ctrl+C to stop)
 BLOCK_CHECKER_CONFIG=/opt/cardano/blockChecker/config.json venv/bin/python block_checker.py
 ```
+
+## Testing with a saved log file
+
+By default the script jumps to the **end** of the log file and only reacts to
+new events — this is correct for production but means it skips content that is
+already in the file.
+
+To replay a saved or historic log fragment, use `--from-start`:
+
+```bash
+# Point node_log_path in config.json to your test file, then:
+BLOCK_CHECKER_CONFIG=config.json venv/bin/python block_checker.py --from-start
+```
+
+The script will process every line from the beginning of the file, send
+Telegram messages for any `TraceForgedBlock` events it finds, and then keep
+watching for new lines (same as normal operation).
+
+**Block hash key variations across node versions**
+
+Different cardano-node versions write the block hash under different JSON keys:
+`blockHash`, `headerHash`, or `block`. All three are detected automatically.
 
 ## Configuration
 
@@ -117,6 +139,8 @@ sudo journalctl -u blockchecker -f
 - Check that the node log file path in `config.json` is correct
 - Confirm the node is writing JSON logs: `tail -f /path/to/node.json | head -5`
 - Make sure the user running block_checker has read access to the log file
+- If testing with a saved log file, you must use `--from-start` — without it
+  the script skips to the end of the file and sees nothing
 
 **"Block Forged" arrives but no "Block Verified"**
 - Koios may be temporarily slow — wait for the 5-minute timeout message
