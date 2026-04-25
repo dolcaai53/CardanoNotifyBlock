@@ -18,10 +18,14 @@ These events are emitted only by this node when it successfully forges a block.
 Koios public API (`api.koios.rest`) to confirm the block appears on-chain with the
 expected pool ID as slot leader. Retries every 20 seconds for up to 5 minutes.
 
-**Notification:** two Telegram messages per block:
-1. Immediate on `TraceForgedBlock` — "Block Forged, verifying..."
-2. After Koios confirms pool match — "Block Verified Onchain"
-   Or a warning if pool mismatches or verification times out.
+**Notification:** one Telegram message per block, sent after Koios confirms the block.
+Contains: block number, hash (linked to cexplorer.io), block size, TX count,
+blocks minted in current epoch, estimated blocks for the epoch, luck %, and lifetime block count.
+Or a warning if pool mismatches or verification times out.
+
+Luck is computed as: `(blocks_in_epoch / expected) × 100`
+where `expected = (pool_active_stake / network_active_stake) × 21 600`
+(432 000 slots/epoch × 0.05 active-slot coefficient).
 
 ## Key implementation decisions
 

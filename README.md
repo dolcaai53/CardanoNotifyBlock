@@ -1,11 +1,22 @@
 # Cardano Block Checker
 
-Monitors cardano-node logs and verifies minted blocks onchain. For each block
-this node produces, two Telegram notifications are sent:
+Monitors cardano-node logs and verifies minted blocks onchain. When a block is
+confirmed on-chain, one Telegram notification is sent with full details:
 
-1. **Block Forged** — immediately when the node creates the block (local log event)
-2. **Block Verified** — after Koios API confirms the block is on-chain and the
-   slot leader matches the configured pool ID (onchain proof)
+```
+👨‍🌾 New Block!
+
+0️⃣ Block No: 13322799
+#️⃣ Hash: 31b06723e7...76e  (linked to cexplorer.io)
+🔡 Block Size: 4kB
+🔢 TX Count: 3
+
+⛏️ Blocks in Epoch: 2
+🗓 Estimated Blocks in Whole Epoch: 0.81
+🎁 Luck: 🎉247% performance
+
+🧱 Total Blocks: 529
+```
 
 If the pool ID does not match, or the block is not found within 5 minutes,
 a warning notification is sent instead.
@@ -17,20 +28,23 @@ cardano-node log
       │
       │  TraceForgedBlock event
       ▼
-block_checker.py  ──► Telegram: "Block Forged, verifying..."
+block_checker.py  (background thread)
       │
-      │  background thread polls Koios API
+      │  polls Koios: block_info, pool_blocks, pool_info, epoch_info
       ▼
 https://api.koios.rest
       │
       │  block.pool == config.pool_id ?
       ▼
-Telegram: "Block Verified Onchain"  or  "WARNING: Pool Mismatch"
+Telegram: one rich notification  or  "⚠️ Pool Mismatch / Timeout"
 ```
 
 Koios is a free public Cardano blockchain API — no account or API key required.
 Verification starts 20 seconds after the forge event, retries every 20 seconds
 for up to 5 minutes.
+
+Luck is calculated as `(blocks_minted_in_epoch / expected_blocks) × 100` where
+`expected = (pool_active_stake / network_active_stake) × 21 600`.
 
 ## Requirements
 
