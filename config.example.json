@@ -2,5 +2,8 @@
     "node_log_path": "/opt/cardano/cnode/logs/node.json",
     "pool_id": "pool1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "telegram_bot_token": "1234567890:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "telegram_chat_id": "-1001234567890"
+    "telegram_chat_id": "-1001234567890",
+    "stake_check_enabled": true,
+    "stake_check_interval_minutes": 60,
+    "stake_change_threshold_ada": 150
 }

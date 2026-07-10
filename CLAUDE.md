@@ -27,6 +27,13 @@ Luck is computed as: `(blocks_in_epoch / expected) × 100`
 where `expected = (pool_active_stake / network_active_stake) × 21 600`
 (432 000 slots/epoch × 0.05 active-slot coefficient).
 
+**Live stake monitoring:** a periodic check (default hourly) polls Koios `pool_info`
+for the pool's live stake and notifies on any change beyond a threshold (default
+150 ADA), up or down. The message includes the delegator count so reward drift
+— which raises live stake once per epoch without changing the count — can be told
+apart from a real (un)delegation. Runs inline in the tail loop's idle branch, no
+extra thread.
+
 ## Key implementation decisions
 
 - Background thread for Koios polling so log tailing is never blocked
@@ -34,6 +41,8 @@ where `expected = (pool_active_stake / network_active_stake) × 21 600`
 - Block lookup by hash first (more precise), falls back to slot number if hash is not in log event
 - Inode check on every 0.5s sleep detects log rotation without a fixed timer
 - Daemon thread — no cleanup needed if the main process exits
+- Live-stake baseline compared against the last *notified* value (not the last poll),
+  persisted to `stake_state.json` so slow drift accumulates instead of being masked
 
 ## Deferred: approach B (cncli)
 
@@ -49,6 +58,9 @@ Revisit if stronger verification is needed. See project memory for details.
 | `pool_id` | string | Pool bech32 ID (`pool1...`) — verified against Koios response |
 | `telegram_bot_token` | string | Telegram bot token from @BotFather |
 | `telegram_chat_id` | string | Telegram chat/channel/group ID |
+| `stake_check_enabled` | bool | Enable live-stake monitoring (default `true`) |
+| `stake_check_interval_minutes` | int | Live-stake poll interval (default `60`) |
+| `stake_change_threshold_ada` | number | Notify on live-stake change ≥ this many ADA (default `150`) |
 
 ## Files
 
@@ -59,3 +71,4 @@ Revisit if stronger verification is needed. See project memory for details.
 | `config.example.json` | Config template (copy to `config.json`) |
 | `requirements.txt` | Python deps (`requests` only) |
 | `README.md` | Setup and troubleshooting guide |
+| `stake_state.json` | Runtime — persisted live-stake baseline, auto-created next to config |

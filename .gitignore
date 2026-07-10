@@ -1,4 +1,5 @@
 config.json
+stake_state.json
 venv/
 __pycache__/
 *.pyc

@@ -46,6 +46,37 @@ for up to 5 minutes.
 Luck is calculated as `(blocks_minted_in_epoch / expected_blocks) × 100` where
 `expected = (pool_active_stake / network_active_stake) × 21 600`.
 
+## Live stake monitoring
+
+Alongside block notifications, the script periodically checks the pool's
+**live stake** (ADA currently delegated) via Koios and sends a Telegram message
+when it changes beyond a configurable threshold — up or down:
+
+```
+💰 Live Stake Changed
+
+📈 +12,400 ADA
+Live Stake: 707,015 → 719,415 ADA
+👥 Delegators: 92 → 93 (Δ +1)
+
+🔗 cexplorer.io
+```
+
+The check runs inline in the log-tailing loop (no extra thread) at the configured
+interval. The comparison baseline is the **last notified value**, persisted to
+`stake_state.json` next to the config file — so it survives a service restart and
+slow drift is never masked (small changes accumulate until they cross the
+threshold). The first run silently records the current stake as the baseline and
+sends no message.
+
+**Note on noise:** live stake is never perfectly stable — staking rewards raise it
+once per epoch (roughly `live_stake × yearly_rate ÷ 73` ADA), which for a small
+pool can approach a low threshold. Expect about one message per epoch even without
+a real (un)delegation; in that case the delegator count in the message stays the
+same, so you can tell reward drift from an actual delegation change. Raise
+`stake_change_threshold_ada` if you want fewer messages, or set
+`stake_check_enabled` to `false` to turn the feature off entirely.
+
 ## Requirements
 
 - Python 3.8+
@@ -103,6 +134,9 @@ Different cardano-node versions write the block hash under different JSON keys:
 | `pool_id` | Your pool bech32 ID (`pool1...`) — used for onchain verification |
 | `telegram_bot_token` | Bot token from @BotFather |
 | `telegram_chat_id` | Chat / channel / group ID where notifications are sent |
+| `stake_check_enabled` | Turn live-stake monitoring on/off (default `true`) |
+| `stake_check_interval_minutes` | How often to poll Koios for live stake (default `60`) |
+| `stake_change_threshold_ada` | Notify when live stake changes by at least this many ADA, up or down (default `150`) |
 
 ### Getting your Telegram chat ID
 

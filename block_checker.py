@@ -277,6 +277,111 @@ def verify_onchain(block_hash: Optional[str], slot: int, block_no: int,
     send_telegram(token, chat_id, msg)
 
 
+# ---------------------------------------------------------------------------
+# Live stake monitoring
+# Periodically poll Koios for the pool's live stake (ADA currently delegated)
+# and notify on any change beyond a configured threshold.
+# ---------------------------------------------------------------------------
+
+def load_stake_state(path: str) -> Optional[dict]:
+    """Load the persisted live-stake baseline. Returns None if not yet created."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        log.warning("Could not read stake state %s: %s", path, e)
+        return None
+
+
+def save_stake_state(path: str, state: dict) -> None:
+    """Persist the live-stake baseline so it survives a service restart.
+    Written atomically (tmp + replace) so a crash mid-write cannot corrupt it."""
+    try:
+        tmp = f"{path}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f)
+        os.replace(tmp, path)
+    except Exception as e:
+        log.error("Could not write stake state %s: %s", path, e)
+
+
+def build_stake_notification(pool_id: str, old: dict, new: dict) -> str:
+    """Compose the Telegram message for a live-stake (delegation) change."""
+    old_stake = old["live_stake"]
+    new_stake = new["live_stake"]
+    delta = new_stake - old_stake  # lovelace, signed
+
+    arrow = "📈" if delta > 0 else "📉"
+    sign = "+" if delta > 0 else "-"
+    delta_ada = abs(delta) / 1e6
+
+    lines = [
+        "💰 <b>Live Stake Changed</b>",
+        "",
+        f"{arrow} {sign}{delta_ada:,.0f} ADA",
+        f"Live Stake: {old_stake / 1e6:,.0f} → {new_stake / 1e6:,.0f} ADA",
+    ]
+
+    # Delegator count helps tell a real (un)delegation from reward drift:
+    # staking rewards raise live stake but never change the delegator count.
+    old_deleg = old.get("live_delegators")
+    new_deleg = new.get("live_delegators")
+    if old_deleg is not None and new_deleg is not None:
+        ddelta = new_deleg - old_deleg
+        dsign = "+" if ddelta >= 0 else "-"
+        lines.append(f"👥 Delegators: {old_deleg} → {new_deleg} (Δ {dsign}{abs(ddelta)})")
+
+    lines.append("")
+    lines.append(f'🔗 <a href="https://cexplorer.io/pool/{pool_id}">cexplorer.io</a>')
+
+    return "\n".join(lines)
+
+
+def check_live_stake(config: dict, state_path: str) -> None:
+    """
+    Poll Koios for the current live stake and notify on a change beyond the
+    threshold. Compares against the last *notified* baseline (persisted in
+    state_path), not the previous poll — so slow drift eventually crosses the
+    threshold instead of being masked by resetting the reference every round.
+    """
+    pool_id = config["pool_id"]
+    token = config["telegram_bot_token"]
+    chat_id = config["telegram_chat_id"]
+    # Threshold is given in ADA; live_stake from Koios is in lovelace (1 ADA = 1e6).
+    threshold_lovelace = int(float(config.get("stake_change_threshold_ada", 150)) * 1_000_000)
+
+    info = fetch_pool_info(pool_id)
+    if not info or info.get("live_stake") is None:
+        log.warning("Live-stake check: no pool_info from Koios — skipping this round")
+        return
+
+    current = {
+        "live_stake": int(info["live_stake"]),
+        "live_delegators": info.get("live_delegators"),
+        "checked_at": int(time.time()),
+    }
+
+    baseline = load_stake_state(state_path)
+
+    # First ever run (or unreadable state) — seed the baseline silently, no message.
+    if baseline is None or "live_stake" not in baseline:
+        save_stake_state(state_path, current)
+        log.info("Live-stake baseline seeded: %.0f ADA", current["live_stake"] / 1e6)
+        return
+
+    delta = current["live_stake"] - baseline["live_stake"]
+    if abs(delta) >= threshold_lovelace:
+        log.info("Live-stake change %+d lovelace (>= threshold) — notifying", delta)
+        msg = build_stake_notification(pool_id, baseline, current)
+        send_telegram(token, chat_id, msg)
+        # Advance the baseline only after a notification actually fires.
+        save_stake_state(state_path, current)
+    else:
+        log.info("Live-stake change %+d lovelace below threshold — no action", delta)
+
+
 def process_line(line: str, token: str, chat_id: str, pool_id: str) -> None:
     """Parse one log line and react to block forge events."""
     if not line:
@@ -315,14 +420,28 @@ def process_line(line: str, token: str, chat_id: str, pool_id: str) -> None:
         t.start()
 
 
-def tail_log(log_path: str, config: dict, from_start: bool = False) -> None:
+def tail_log(log_path: str, config: dict, state_path: str, from_start: bool = False) -> None:
     """Follow the node log file, reopening it automatically on rotation.
     from_start=True reads existing content first — useful for testing with a static file."""
     token = config["telegram_bot_token"]
     chat_id = config["telegram_chat_id"]
     pool_id = config["pool_id"]
 
+    # Live-stake monitoring config (all optional, sensible defaults)
+    stake_enabled = config.get("stake_check_enabled", True)
+    stake_interval = config.get("stake_check_interval_minutes", 60) * 60  # -> seconds
+
     log.info("Watching log: %s  pool: %s  from_start=%s", log_path, pool_id, from_start)
+
+    # Seed / refresh the baseline once at startup. If the state file is missing
+    # this silently records the current stake; if it exists (restart), it will
+    # notify only on a real change that happened while we were down.
+    if stake_enabled:
+        log.info("Live-stake monitoring enabled — interval=%s min, threshold=%s ADA",
+                 config.get("stake_check_interval_minutes", 60),
+                 config.get("stake_change_threshold_ada", 150))
+        check_live_stake(config, state_path)
+    last_stake_check = time.time()
 
     while True:
         try:
@@ -336,6 +455,13 @@ def tail_log(log_path: str, config: dict, from_start: bool = False) -> None:
                         process_line(line.strip(), token, chat_id, pool_id)
                     else:
                         time.sleep(0.5)
+                        # Periodic live-stake check — runs only while idle so it
+                        # never delays processing of buffered log lines. A single
+                        # Koios call (~1s) won't lose forge events: unread lines
+                        # stay in the file and are read on the next iteration.
+                        if stake_enabled and time.time() - last_stake_check >= stake_interval:
+                            check_live_stake(config, state_path)
+                            last_stake_check = time.time()
                         # Detect log rotation (file replaced by logrotate)
                         try:
                             if os.stat(log_path).st_ino != current_inode:
@@ -364,7 +490,9 @@ def main():
         sys.exit(1)
 
     config = load_config(config_path)
-    tail_log(config["node_log_path"], config, from_start=args.from_start)
+    # Stake baseline lives next to the config file (survives restarts).
+    state_path = str(Path(config_path).parent / "stake_state.json")
+    tail_log(config["node_log_path"], config, state_path, from_start=args.from_start)
 
 
 if __name__ == "__main__":
